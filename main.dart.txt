@@ -1,0 +1,1328 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+Future<void> initializeApp() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: "AIzaSyDUeEXAMPLE",
+        appId: "1:993742554675:android:e415ba2f5f1d6998a74546",
+        messagingSenderId: "993742554675",
+        projectId: "miniquizapp1",
+        storageBucket: "miniquizapp1.appspot.com",
+      ),
+    );
+    print('✅ Firebase initialisé avec succès!');
+
+  } catch (e) {
+    print('⚠️ Erreur Firebase: $e');
+  }
+}
+
+void main() async {
+  await initializeApp();
+  runApp(const MiniQuizApp());
+}
+
+class MiniQuizApp extends StatelessWidget {
+  const MiniQuizApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Mini Quiz',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+// ========== PAGE LEADERBOARD ==========
+class LeaderboardScreen extends StatelessWidget {
+  const LeaderboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('🏆 Classement'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: DefaultTabController(
+        length: 3,
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.deepPurple.shade400, Colors.deepPurple.shade700],
+                ),
+              ),
+              child: const Column(
+                children: [
+                  Text(
+                    'TOP DES JOUEURS',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Affrontez les meilleurs',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              color: Colors.white,
+              child: TabBar(
+                labelColor: Colors.deepPurple,
+                unselectedLabelColor: Colors.grey,
+                indicatorColor: Colors.deepPurple,
+                tabs: const [
+                  Tab(text: 'FACILE'),
+                  Tab(text: 'MOYEN'),
+                  Tab(text: 'DIFFICILE'),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildLeaderboardTab('facile'),
+                  _buildLeaderboardTab('moyen'),
+                  _buildLeaderboardTab('difficile'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLeaderboardTab(String difficulty) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('scores')
+          .where('difficulty', isEqualTo: difficulty)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.leaderboard_outlined,
+                  size: 80,
+                  color: Colors.grey.shade300,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Aucun score pour $difficulty',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        List<QueryDocumentSnapshot> scores = snapshot.data!.docs;
+
+        final Map<String, QueryDocumentSnapshot> bestScores = {};
+
+        for (final score in scores) {
+          final data = score.data() as Map<String, dynamic>;
+          final userName = data['userName']?.toString().trim() ?? 'Anonyme';
+          final percentage = (data['percentage'] ?? 0) as int;
+
+          // Si l'utilisateur n'existe pas encore OU si ce score est meilleur
+          if (!bestScores.containsKey(userName) ||
+              percentage > ((bestScores[userName]!.data() as Map<String, dynamic>)['percentage'] ?? 0)) {
+            bestScores[userName] = score;
+          }
+        }
+
+        // Convertir en liste et trier par pourcentage
+        final uniqueScores = bestScores.values.toList();
+        uniqueScores.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aPercentage = (aData['percentage'] ?? 0) as int;
+          final bPercentage = (bData['percentage'] ?? 0) as int;
+          return bPercentage.compareTo(aPercentage);
+        });
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: uniqueScores.length,
+          itemBuilder: (context, index) {
+            final score = uniqueScores[index];
+            final data = score.data() as Map<String, dynamic>;
+            final userName = data['userName']?.toString().trim() ?? 'Anonyme';
+            final scoreValue = (data['score'] ?? 0) as int;
+            final totalQuestions = (data['totalQuestions'] ?? 1) as int;
+            final percentage = (data['percentage'] ?? 0) as int;
+            final dateStr = data['date'];
+
+            // Formater la date
+            String formattedDate = 'Aujourd\'hui';
+            if (dateStr != null) {
+              try {
+                final date = DateTime.parse(dateStr as String).toLocal();
+                final now = DateTime.now();
+                final difference = now.difference(date);
+
+                if (difference.inDays == 0) {
+                  formattedDate = 'Aujourd\'hui';
+                } else if (difference.inDays == 1) {
+                  formattedDate = 'Hier';
+                } else if (difference.inDays < 7) {
+                  formattedDate = 'Il y a ${difference.inDays} jours';
+                } else {
+                  formattedDate = '${date.day}/${date.month}/${date.year}';
+                }
+              } catch (e) {
+                formattedDate = 'Date inconnue';
+              }
+            }
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: index < 3 ? _getRankColor(index) : Colors.grey.shade200,
+                  child: Text(
+                    '${index + 1}',
+                    style: TextStyle(
+                      color: index < 3 ? Colors.white : Colors.grey.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  userName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text('$scoreValue/$totalQuestions • $formattedDate'),
+                trailing: Chip(
+                  label: Text(
+                    '$percentage%',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  backgroundColor: _getPercentageColor(percentage),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Color _getRankColor(int index) {
+    switch (index) {
+      case 0: return Colors.amber;
+      case 1: return Colors.grey;
+      case 2: return Colors.brown;
+      default: return Colors.blue;
+    }
+  }
+
+  Color _getPercentageColor(int percentage) {
+    if (percentage >= 80) return Colors.green;
+    if (percentage >= 60) return Colors.orange;
+    return Colors.red;
+  }
+}
+
+// ========== ÉCRAN PRINCIPAL ==========
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final TextEditingController _nameController = TextEditingController();
+  String? _userName;
+  int _score = 0;
+  int _currentQuestion = 0;
+  String _difficulty = 'facile';
+  int _timeLeft = 30;
+  Timer? _timer;
+  bool _showCorrection = false;
+  String _correctionText = '';
+  bool _isCorrect = false;
+
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // QUESTIONS PAR DIFFICULTÉ
+  final Map<String, List<Map<String, dynamic>>> _questions = {
+    'facile': [
+      {
+        'question': 'Que signifie HTML?',
+        'options': [
+          'Hyper Text Markup Language',
+          'High Tech Modern Language',
+          'Home Tool Markup Language',
+          'Hyper Transfer Markup Language'
+        ],
+        'answer': 0,
+        'explication': 'HTML = Hyper Text Markup Language'
+      },
+      {
+        'question': 'Quel langage stylise les pages web?',
+        'options': ['JavaScript', 'CSS', 'Python', 'Java'],
+        'answer': 1,
+        'explication': 'CSS = Cascading Style Sheets'
+      },
+      {
+        'question': 'Quel outil est utilisé pour le contrôle de version?',
+        'options': ['Git', 'Photoshop', 'Excel', 'Word'],
+        'answer': 0,
+        'explication': 'Git est le système de contrôle de version le plus populaire'
+      },
+      {
+        'question': 'Que signifie URL?',
+        'options': [
+          'Uniform Resource Locator',
+          'Universal Resource Link',
+          'Uniform Resource Link',
+          'Universal Reference Locator'
+        ],
+        'answer': 0,
+        'explication': 'URL = Uniform Resource Locator'
+      },
+      {
+        'question': 'Quel navigateur est développé par Google?',
+        'options': ['Firefox', 'Safari', 'Chrome', 'Edge'],
+        'answer': 2,
+        'explication': 'Google Chrome est développé par Google'
+      },
+      {
+        'question': 'Que signifie HTTP?',
+        'options': [
+          'Hyper Text Transfer Protocol',
+          'High Tech Transfer Protocol',
+          'Hyper Transfer Text Protocol',
+          'High Text Transfer Protocol'
+        ],
+        'answer': 0,
+        'explication': 'HTTP = Hyper Text Transfer Protocol'
+      },
+      {
+        'question': 'Quelle balise HTML crée un lien?',
+        'options': ['<link>', '<a>', '<href>', '<url>'],
+        'answer': 1,
+        'explication': 'La balise <a> crée un lien hypertexte'
+      },
+      {
+        'question': 'Quel langage s\'exécute dans le navigateur?',
+        'options': ['Python', 'Java', 'JavaScript', 'C++'],
+        'answer': 2,
+        'explication': 'JavaScript s\'exécute côté client dans le navigateur'
+      },
+      {
+        'question': 'Que signifie SQL?',
+        'options': [
+          'Structured Query Language',
+          'Simple Query Language',
+          'Standard Query Language',
+          'System Query Language'
+        ],
+        'answer': 0,
+        'explication': 'SQL = Structured Query Language'
+      },
+      {
+        'question': 'Quel est l\'attribut pour une image en HTML?',
+        'options': ['src', 'href', 'link', 'url'],
+        'answer': 0,
+        'explication': 'L\'attribut src spécifie la source d\'une image'
+      },
+    ],
+    'moyen': [
+      {
+        'question': 'Qu\'est-ce qu\'une closure en JavaScript?',
+        'options': [
+          'Une fonction avec accès à son scope parent',
+          'Un type de variable',
+          'Une méthode de boucle',
+          'Un opérateur logique'
+        ],
+        'answer': 0,
+        'explication': 'Une closure garde accès à son contexte parent même après exécution'
+      },
+      {
+        'question': 'Quelle est la différence entre var, let et const?',
+        'options': [
+          'var: fonction scope, let/const: block scope',
+          'Tous sont identiques',
+          'const ne peut pas être réassigné',
+          'Les deux premières réponses'
+        ],
+        'answer': 3,
+        'explication': 'var a une portée de fonction, let/const ont une portée de bloc, et const ne peut pas être réassigné'
+      },
+      {
+        'question': 'Qu\'est-ce qu\'une API REST?',
+        'options': [
+          'Une API qui utilise les verbes HTTP',
+          'Un type de base de données',
+          'Un langage de programmation',
+          'Un framework JavaScript'
+        ],
+        'answer': 0,
+        'explication': 'REST utilise les méthodes HTTP: GET, POST, PUT, DELETE'
+      },
+      {
+        'question': 'Quelle méthode array ajoute un élément à la fin?',
+        'options': ['push()', 'pop()', 'shift()', 'unshift()'],
+        'answer': 0,
+        'explication': 'push() ajoute un élément à la fin d\'un tableau'
+      },
+      {
+        'question': 'Que signifie CSS?',
+        'options': [
+          'Cascading Style Sheets',
+          'Computer Style Sheets',
+          'Creative Style System',
+          'Cascading System Style'
+        ],
+        'answer': 0,
+        'explication': 'CSS = Cascading Style Sheets'
+      },
+      {
+        'question': 'Qu\'est-ce que le DOM?',
+        'options': [
+          'Document Object Model',
+          'Data Object Model',
+          'Document Oriented Model',
+          'Digital Object Management'
+        ],
+        'answer': 0,
+        'explication': 'DOM = Document Object Model'
+      },
+      {
+        'question': 'Quelle méthode HTTP est utilisée pour créer?',
+        'options': ['GET', 'POST', 'PUT', 'DELETE'],
+        'answer': 1,
+        'explication': 'POST est utilisé pour créer de nouvelles ressources'
+      },
+      {
+        'question': 'Qu\'est-ce qu\'une promesse en JavaScript?',
+        'options': [
+          'Un objet représentant une opération asynchrone',
+          'Un type de boucle',
+          'Une fonction synchrone',
+          'Une variable globale'
+        ],
+        'answer': 0,
+        'explication': 'Une promesse représente une valeur future'
+      },
+      {
+        'question': 'Quel sélecteur CSS cible une classe?',
+        'options': ['#', '.', '*', '@'],
+        'answer': 1,
+        'explication': 'Le point (.) cible une classe en CSS'
+      },
+      {
+        'question': 'Quelle est la syntaxe correcte pour un commentaire en JavaScript?',
+        'options': ['// comment', '<!-- comment -->', '# comment', '/* comment */'],
+        'answer': 0,
+        'explication': '// pour une ligne, /* */ pour plusieurs lignes'
+      },
+    ],
+    'difficile': [
+      {
+        'question': 'Quelle est la complexité de la recherche binaire?',
+        'options': ['O(n)', 'O(n²)', 'O(log n)', 'O(1)'],
+        'answer': 2,
+        'explication': 'O(log n) - la taille est divisée par deux à chaque étape'
+      },
+      {
+        'question': 'Qu\'est-ce que le pattern Singleton?',
+        'options': [
+          'Un pattern qui limite à une seule instance',
+          'Un pattern de création multiple',
+          'Un pattern structurel',
+          'Un pattern de comportement'
+        ],
+        'answer': 0,
+        'explication': 'Singleton garantit qu\'une classe n\'a qu\'une seule instance'
+      },
+      {
+        'question': 'Qu\'est-ce qu\'un arbre binaire de recherche?',
+        'options': [
+          'Un arbre où chaque nœud a au plus 2 enfants',
+          'Un arbre trié',
+          'Les deux réponses',
+          'Aucune des réponses'
+        ],
+        'answer': 2,
+        'explication': 'Un ABR est un arbre binaire trié'
+      },
+      {
+        'question': 'Qu\'est-ce que le garbage collection?',
+        'options': [
+          'Libération automatique de la mémoire',
+          'Collecte de données',
+          'Nettoyage de code',
+          'Optimisation de base de données'
+        ],
+        'answer': 0,
+        'explication': 'Garbage collection libère la mémoire non utilisée'
+      },
+      {
+        'question': 'Qu\'est-ce qu\'un deadlock?',
+        'options': [
+          'Situation où deux processus s\'attendent mutuellement',
+          'Une erreur de syntaxe',
+          'Une boucle infinie',
+          'Une fuite de mémoire'
+        ],
+        'answer': 0,
+        'explication': 'Deadlock: blocage mutuel de processus'
+      },
+      {
+        'question': 'Quelle est la différence entre TCP et UDP?',
+        'options': [
+          'TCP est fiable, UDP ne l\'est pas',
+          'UDP est plus rapide que TCP',
+          'Les deux réponses',
+          'Aucune différence'
+        ],
+        'answer': 2,
+        'explication': 'TCP est fiable et ordonné, UDP est plus rapide'
+      },
+      {
+        'question': 'Qu\'est-ce que l\'injection SQL?',
+        'options': [
+          'Une attaque exploitant des requêtes non sécurisées',
+          'Une méthode d\'optimisation',
+          'Un type de base de données',
+          'Une fonction SQL'
+        ],
+        'answer': 0,
+        'explication': 'Injection SQL: insertion de code malveillant dans des requêtes'
+      },
+      {
+        'question': 'Qu\'est-ce qu\'un microservice?',
+        'options': [
+          'Une architecture de petites applications indépendantes',
+          'Un petit service',
+          'Une fonction dans une application',
+          'Une API REST'
+        ],
+        'answer': 0,
+        'explication': 'Microservices: architecture décomposée en services indépendants'
+      },
+      {
+        'question': 'Qu\'est-ce que le pattern Observer?',
+        'options': [
+          'Un pattern où un objet notifie ses observateurs',
+          'Un pattern de création',
+          'Un pattern structurel',
+          'Un pattern de comportement'
+        ],
+        'answer': 0,
+        'explication': 'Observer: un objet notifie des changements à ses abonnés'
+      },
+      {
+        'question': 'Qu\'est-ce que la récursivité?',
+        'options': [
+          'Une fonction qui s\'appelle elle-même',
+          'Une boucle',
+          'Une condition',
+          'Une variable'
+        ],
+        'answer': 0,
+        'explication': 'Récursivité: fonction qui s\'appelle jusqu\'à une condition d\'arrêt'
+      },
+    ],
+  };
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timeLeft = 30;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_timeLeft > 0) {
+        setState(() => _timeLeft--);
+      } else {
+        _timer?.cancel();
+        _showCorrectionAndNext(false, '⏰ Temps écoulé !');
+      }
+    });
+  }
+
+  void _showCorrectionAndNext(bool isCorrect, String correction) {
+    setState(() {
+      _showCorrection = true;
+      _correctionText = correction;
+      _isCorrect = isCorrect;
+    });
+
+    if (isCorrect) {
+      _score++;
+    }
+
+    Timer(const Duration(seconds: 3), () {
+      setState(() {
+        _showCorrection = false;
+      });
+      _nextQuestion();
+    });
+  }
+
+  void _nextQuestion() {
+    final questions = _questions[_difficulty]!;
+    if (_currentQuestion < questions.length - 1) {
+      setState(() => _currentQuestion++);
+      _startTimer();
+    } else {
+      _finishQuiz();
+    }
+  }
+
+  Future<void> _saveScoreToFirebase() async {
+    if (_userName == null) return;
+
+    try {
+      // Nettoyer le nom de l'utilisateur
+      final cleanUserName = _userName!.trim();
+
+      await _firestore.collection('scores').add({
+        'userName': cleanUserName,
+        'score': _score,
+        'difficulty': _difficulty,
+        'date': DateTime.now().toIso8601String(),
+        'totalQuestions': _questions[_difficulty]!.length,
+        'percentage': (_score / _questions[_difficulty]!.length * 100).round(),
+      });
+      print('✅ Score sauvegardé pour $cleanUserName');
+    } catch (e) {
+      print('⚠️ Erreur sauvegarde score: $e');
+    }
+  }
+
+  void _startQuiz() {
+    if (_nameController.text.isNotEmpty) {
+      final name = _nameController.text.trim();
+      setState(() {
+        _userName = name;
+        _score = 0;
+        _currentQuestion = 0;
+      });
+      _startTimer();
+    }
+  }
+
+  void _answerQuestion(int selectedIndex) {
+    _timer?.cancel();
+
+    final questions = _questions[_difficulty]!;
+    final question = questions[_currentQuestion];
+    bool isCorrect = selectedIndex == question['answer'];
+
+    _showCorrectionAndNext(isCorrect, question['explication'] as String);
+  }
+
+  void _finishQuiz() async {
+    _timer?.cancel();
+    await _saveScoreToFirebase();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🏆 Quiz Terminé !'),
+        content: SizedBox(
+          height: 350,
+          child: Column(
+            children: [
+              Text(
+                'Félicitations $_userName!',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _getScoreColor(),
+                ),
+                child: Center(
+                  child: Text(
+                    '$_score/${_questions[_difficulty]!.length}',
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Pourcentage: ${(_score / _questions[_difficulty]!.length * 100).round()}%',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 30),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() => _userName = null);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Accueil'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const LeaderboardScreen()),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Classement'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _score = 0;
+                      _currentQuestion = 0;
+                    });
+                    _startTimer();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.blue),
+                  ),
+                  child: const Text('Rejouer avec même difficulté'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getScoreColor() {
+    final percentage = _score / _questions[_difficulty]!.length;
+    if (percentage >= 0.8) return Colors.green;
+    if (percentage >= 0.6) return Colors.orange;
+    return Colors.red;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _userName == null ? Colors.white : Colors.grey.shade50,
+      appBar: AppBar(
+        title: Text(_userName == null ? 'Mini Quiz PFA' : 'Quiz - $_userName'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        actions: _userName != null
+            ? [
+          IconButton(
+            icon: const Icon(Icons.home),
+            onPressed: () {
+              setState(() => _userName = null);
+              _timer?.cancel();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.leaderboard),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const LeaderboardScreen()),
+              );
+            },
+          ),
+        ]
+            : [
+          IconButton(
+            icon: const Icon(Icons.leaderboard),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const LeaderboardScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+      body: _userName == null ? _buildWelcomeScreen() : _buildQuizScreen(),
+    );
+  }
+
+  Widget _buildWelcomeScreen() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF667eea),
+            Color(0xFF764ba2),
+          ],
+        ),
+      ),
+      child: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(70),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.white.withOpacity(0.3),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.quiz,
+                    size: 70,
+                    color: Color(0xFF667eea),
+                  ),
+                ),
+
+                const SizedBox(height: 30),
+
+                const Text(
+                  'QUIZ DÉVELOPPEMENT',
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                const Text(
+                  'Testez vos connaissances en informatique',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white70,
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'COMMENCER LE QUIZ',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF667eea),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      TextField(
+                        controller: _nameController,
+                        decoration: InputDecoration(
+                          labelText: 'Votre nom',
+                          hintText: 'Entrez votre nom',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          prefixIcon: const Icon(Icons.person, color: Color(0xFF667eea)),
+                          filled: true,
+                          fillColor: Colors.grey.shade50,
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Sélectionnez la difficulté:',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildDifficultyCard('facile', 'FACILE', Colors.green, Icons.star_border),
+                          _buildDifficultyCard('moyen', 'MOYEN', Colors.orange, Icons.star_half),
+                          _buildDifficultyCard('difficile', 'DIFFICILE', Colors.red, Icons.star),
+                        ],
+                      ),
+
+                      const SizedBox(height: 30),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: ElevatedButton(
+                          onPressed: _startQuiz,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF667eea),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 5,
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.play_arrow, size: 24),
+                              SizedBox(width: 10),
+                              Text(
+                                'COMMENCER LE QUIZ',
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: OutlinedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => const LeaderboardScreen()),
+                            );
+                          },
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF667eea)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.leaderboard, size: 20, color: Color(0xFF667eea)),
+                              SizedBox(width: 10),
+                              Text(
+                                'VOIR LE CLASSEMENT',
+                                style: TextStyle(fontSize: 16, color: Color(0xFF667eea)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDifficultyCard(String level, String title, Color color, IconData icon) {
+    return GestureDetector(
+      onTap: () => setState(() => _difficulty = level),
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _difficulty == level ? color.withOpacity(0.15) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _difficulty == level ? color : Colors.grey.shade300,
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              color: _difficulty == level ? color : Colors.grey,
+              size: 36,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: _difficulty == level ? color : Colors.grey,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuizScreen() {
+    final questions = _questions[_difficulty]!;
+    final question = questions[_currentQuestion];
+    final List<String> options = List<String>.from(question['options']);
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Question ${_currentQuestion + 1}/${questions.length}',
+                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                  Text(
+                    'Score: $_score',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _getDifficultyColor(_difficulty).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _getDifficultyIcon(_difficulty),
+                      color: _getDifficultyColor(_difficulty),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _difficulty.toUpperCase(),
+                      style: TextStyle(
+                        color: _getDifficultyColor(_difficulty),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        Container(
+          height: 6,
+          color: Colors.grey.shade200,
+          child: LinearProgressIndicator(
+            value: _timeLeft / 30,
+            backgroundColor: Colors.transparent,
+            valueColor: AlwaysStoppedAnimation(_getTimeColor()),
+          ),
+        ),
+
+        Expanded(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: _getTimeColor().withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.timer,
+                                      color: _getTimeColor(),
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '$_timeLeft s',
+                                      style: TextStyle(
+                                        color: _getTimeColor(),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 18,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          Text(
+                            question['question'] as String,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              height: 1.4,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+
+                          const SizedBox(height: 30),
+
+                          for (int i = 0; i < options.length; i++)
+                            _buildOptionButton(i, options[i]),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  if (_showCorrection)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: _isCorrect ? Colors.green.shade50 : Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _isCorrect ? Colors.green.shade200 : Colors.red.shade200,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: _isCorrect ? Colors.green : Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                _isCorrect ? Icons.check : Icons.close,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _isCorrect ? 'Bonne réponse !' : 'Réponse incorrecte',
+                                    style: TextStyle(
+                                      color: _isCorrect ? Colors.green.shade800 : Colors.red.shade800,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _correctionText,
+                                    style: TextStyle(
+                                      color: _isCorrect ? Colors.green.shade700 : Colors.red.shade700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOptionButton(int index, String optionText) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ElevatedButton(
+        onPressed: () => _answerQuestion(index),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          minimumSize: const Size(double.infinity, 60),
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.all(18),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Colors.grey),
+          ),
+          elevation: 2,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.deepPurple,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  String.fromCharCode(65 + index),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 15),
+            Expanded(
+              child: Text(
+                optionText,
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getDifficultyColor(String difficulty) {
+    switch (difficulty) {
+      case 'facile': return Colors.green;
+      case 'moyen': return Colors.orange;
+      case 'difficile': return Colors.red;
+      default: return Colors.blue;
+    }
+  }
+
+  Color _getTimeColor() {
+    if (_timeLeft > 18) return Colors.green;
+    if (_timeLeft > 9) return Colors.orange;
+    return Colors.red;
+  }
+
+  IconData _getDifficultyIcon(String difficulty) {
+    switch (difficulty) {
+      case 'facile': return Icons.star_border;
+      case 'moyen': return Icons.star_half;
+      case 'difficile': return Icons.star;
+      default: return Icons.star;
+    }
+  }
+}
